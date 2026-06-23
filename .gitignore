@@ -35,3 +35,4 @@ dist-ssr
 
 # Supabase local
 supabase/.temp
+.vercel
