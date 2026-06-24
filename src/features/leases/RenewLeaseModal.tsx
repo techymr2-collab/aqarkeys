@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Modal } from "@/components/ui/Modal";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useRenewLease } from "@/data/leases";
+import { useEjariRegistrations } from "@/data/ejari";
 import { friendlyError } from "@/lib/errors";
 import { pushToast } from "@/lib/toast";
 import { formatDate, formatMoney } from "@/lib/format";
@@ -22,9 +24,14 @@ function addYear(iso: string): string {
 
 export function RenewLeaseModal({ open, onClose, lease }: Props) {
   const renew = useRenewLease();
+  const ejari = useEjariRegistrations();
   const [endDate, setEndDate] = useState(addYear(lease.end_date));
   const [rentAmount, setRentAmount] = useState(String(lease.rent_amount));
   const [error, setError] = useState<string | null>(null);
+  const [renewedTo, setRenewedTo] = useState<string | null>(null);
+
+  const leaseEjari = ejari.data?.find((e) => e.lease_id === lease.id);
+  const ejariStale = !leaseEjari || (leaseEjari.expires_at && leaseEjari.expires_at < endDate);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -39,12 +46,53 @@ export function RenewLeaseModal({ open, onClose, lease }: Props) {
       return;
     }
     try {
-      await renew.mutateAsync({ id: lease.id, endDate, rentAmount: amount });
+      await renew.mutateAsync({
+        id: lease.id,
+        endDate,
+        rentAmount: amount,
+        previousEndDate: lease.end_date,
+        previousRentAmount: lease.rent_amount,
+        previousStatus: lease.status,
+      });
       pushToast("Lease renewed", "success");
-      onClose();
+      setRenewedTo(endDate);
     } catch (err) {
       setError(friendlyError(err, "Could not renew the lease."));
     }
+  }
+
+  if (renewedTo) {
+    return (
+      <Modal open={open} onClose={onClose} title="Lease renewed">
+        <p className="text-sm text-slate-600">
+          {lease.tenant?.name ?? "This tenant"}'s lease now runs through{" "}
+          {formatDate(renewedTo)}. Two things worth doing for the new term:
+        </p>
+        <div className="mt-4 flex flex-col gap-2">
+          <Link
+            to="/manager/cheques"
+            onClick={onClose}
+            className="flex items-center justify-between rounded-xl border border-slate-900/10 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-100"
+          >
+            Schedule PDC cheques for the new term
+            <span aria-hidden>→</span>
+          </Link>
+          <Link
+            to="/manager/ejari"
+            onClick={onClose}
+            className="flex items-center justify-between rounded-xl border border-slate-900/10 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-100"
+          >
+            {ejariStale ? "Renew the EJARI registration" : "Review the EJARI registration"}
+            <span aria-hidden>→</span>
+          </Link>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <Button variant="ghost" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </Modal>
+    );
   }
 
   return (

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { ActionIcon } from "@/components/ui/ActionIcon";
-import { RefreshCwIcon, XCircleIcon, TrashIcon, FileTextIcon } from "@/components/icons";
+import { RefreshCwIcon, XCircleIcon, TrashIcon, FileTextIcon, PencilIcon } from "@/components/icons";
 import { LeaseDocumentsModal } from "@/features/documents/LeaseDocumentsModal";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -15,10 +15,13 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table, THead, TH, TBody, TR, TD, TableSkeleton } from "@/components/ui/Table";
 import { LeaseFormModal } from "@/features/leases/LeaseFormModal";
 import { RenewLeaseModal } from "@/features/leases/RenewLeaseModal";
+import { EditLeaseModal } from "@/features/leases/EditLeaseModal";
 import {
   useLeases,
   useTerminateLease,
   useDeleteLease,
+  useBulkTerminateLeases,
+  useBulkDeleteLeases,
   type LeaseWithRelations,
 } from "@/data/leases";
 import { formatDate, formatMoney, daysUntil } from "@/lib/format";
@@ -36,16 +39,22 @@ export function ManagerLeasesPage() {
   const { data, isLoading, isError, refetch } = useLeases();
   const terminate = useTerminateLease();
   const deleteLease = useDeleteLease();
+  const bulkTerminate = useBulkTerminateLeases();
+  const bulkDelete = useBulkDeleteLeases();
   const [adding, setAdding] = useState(false);
   const [renewing, setRenewing] = useState<LeaseWithRelations | null>(null);
+  const [editing, setEditing] = useState<LeaseWithRelations | null>(null);
   const [terminating, setTerminating] = useState<LeaseWithRelations | null>(null);
   const [deleting, setDeleting] = useState<LeaseWithRelations | null>(null);
   const [documenting, setDocumenting] = useState<LeaseWithRelations | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | LeaseStatus>("all");
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkTerminating, setBulkTerminating] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  useEffect(() => { setPage(1); }, [search, statusFilter]);
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [search, statusFilter]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -60,10 +69,42 @@ export function ManagerLeasesPage() {
     });
   }, [data, search, statusFilter]);
 
+  const pageRows = paginate(filtered, page, PAGE_SIZE);
+  const allOnPageSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
+  const selectedRows = filtered.filter((l) => selected.has(l.id));
+  const selectedTerminable = selectedRows.filter(
+    (l) => l.status === "active" || l.status === "upcoming",
+  );
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllOnPage() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        for (const r of pageRows) next.delete(r.id);
+      } else {
+        for (const r of pageRows) next.add(r.id);
+      }
+      return next;
+    });
+  }
+
   async function handleTerminate() {
     if (!terminating?.unit) return;
     try {
-      await terminate.mutateAsync({ id: terminating.id, unitId: terminating.unit.id });
+      await terminate.mutateAsync({
+        id: terminating.id,
+        unitId: terminating.unit.id,
+        previousStatus: terminating.status,
+      });
       pushToast("Lease terminated. Unit is now vacant.", "success");
       setTerminating(null);
     } catch (err) {
@@ -83,6 +124,32 @@ export function ManagerLeasesPage() {
       setDeleting(null);
     } catch (err) {
       pushToast(friendlyError(err, "Could not delete the lease."), "error");
+    }
+  }
+
+  async function handleBulkTerminate() {
+    const rows = selectedTerminable
+      .filter((l) => l.unit)
+      .map((l) => ({ id: l.id, unitId: l.unit!.id, previousStatus: l.status }));
+    try {
+      await bulkTerminate.mutateAsync(rows);
+      setSelected(new Set());
+      setBulkTerminating(false);
+    } catch (err) {
+      pushToast(friendlyError(err, "Could not terminate the selected leases."), "error");
+    }
+  }
+
+  async function handleBulkDelete() {
+    const rows = selectedRows
+      .filter((l) => l.unit)
+      .map((l) => ({ id: l.id, unitId: l.unit!.id, wasActive: l.status === "active" }));
+    try {
+      await bulkDelete.mutateAsync(rows);
+      setSelected(new Set());
+      setBulkDeleting(false);
+    } catch (err) {
+      pushToast(friendlyError(err, "Could not delete the selected leases."), "error");
     }
   }
 
@@ -123,6 +190,26 @@ export function ManagerLeasesPage() {
             </span>
           </div>
 
+          {/* Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="mb-3 flex shrink-0 items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm">
+              <span className="font-medium text-brand-800">{selected.size} selected</span>
+              <div className="ml-auto flex gap-2">
+                {selectedTerminable.length > 0 && (
+                  <Button size="sm" variant="secondary" onClick={() => setBulkTerminating(true)}>
+                    Terminate ({selectedTerminable.length})
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setBulkDeleting(true)}>
+                  Delete
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <EmptyState title="No matches" description="Try a different search or filter." />
           ) : (
@@ -139,6 +226,15 @@ export function ManagerLeasesPage() {
               }
             >
               <THead>
+                <TH className="w-8">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleAllOnPage}
+                    className="h-4 w-4 rounded accent-brand-500"
+                    aria-label="Select all on page"
+                  />
+                </TH>
                 <TH>Tenant</TH>
                 <TH>Unit</TH>
                 <TH>Term</TH>
@@ -147,13 +243,23 @@ export function ManagerLeasesPage() {
                 <TH className="text-right">Actions</TH>
               </THead>
               <TBody>
-                {paginate(filtered, page, PAGE_SIZE).map((l) => {
+                {pageRows.map((l) => {
                   const days = daysUntil(l.end_date);
                   const expiringSoon = l.status === "active" && days >= 0 && days <= 60;
                   const canTerminate = l.status === "active" || l.status === "upcoming";
                   const canRenew = l.status === "active" || l.status === "expired";
+                  const canEdit = l.status === "active" || l.status === "upcoming";
                   return (
                     <TR key={l.id} onClick={() => navigate(`/manager/leases/${l.id}`)}>
+                      <TD onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(l.id)}
+                          onChange={() => toggleRow(l.id)}
+                          className="h-4 w-4 rounded accent-brand-500"
+                          aria-label="Select lease"
+                        />
+                      </TD>
                       <TD className="font-medium text-slate-900">{l.tenant?.name ?? "—"}</TD>
                       <TD>
                         <div>{l.unit?.label ?? "—"}</div>
@@ -178,6 +284,11 @@ export function ManagerLeasesPage() {
                       </TD>
                       <TD className="text-right">
                         <div className="flex items-center justify-end gap-0.5">
+                          {canEdit && (
+                            <ActionIcon label="Edit terms" onClick={(e) => { e.stopPropagation(); setEditing(l); }}>
+                              <PencilIcon className="h-4 w-4" />
+                            </ActionIcon>
+                          )}
                           {canRenew && (
                             <ActionIcon label="Renew" onClick={(e) => { e.stopPropagation(); setRenewing(l); }}>
                               <RefreshCwIcon className="h-4 w-4" />
@@ -216,6 +327,9 @@ export function ManagerLeasesPage() {
       {renewing && (
         <RenewLeaseModal open={!!renewing} onClose={() => setRenewing(null)} lease={renewing} />
       )}
+      {editing && (
+        <EditLeaseModal open={!!editing} onClose={() => setEditing(null)} lease={editing} />
+      )}
       {terminating && (
         <ConfirmDialog
           open={!!terminating}
@@ -238,6 +352,30 @@ export function ManagerLeasesPage() {
           loading={deleteLease.isPending}
           onConfirm={() => void handleDelete()}
           onClose={() => setDeleting(null)}
+        />
+      )}
+      {bulkTerminating && (
+        <ConfirmDialog
+          open={bulkTerminating}
+          title="Terminate leases"
+          message={`Terminate ${selectedTerminable.length} selected lease${selectedTerminable.length === 1 ? "" : "s"}? Each unit will be marked vacant.`}
+          confirmLabel="Terminate"
+          destructive
+          loading={bulkTerminate.isPending}
+          onConfirm={() => void handleBulkTerminate()}
+          onClose={() => setBulkTerminating(false)}
+        />
+      )}
+      {bulkDeleting && (
+        <ConfirmDialog
+          open={bulkDeleting}
+          title="Delete leases"
+          message={`Delete ${selected.size} selected lease${selected.size === 1 ? "" : "s"}? This also deletes their invoices and cannot be undone.`}
+          confirmLabel="Delete"
+          destructive
+          loading={bulkDelete.isPending}
+          onConfirm={() => void handleBulkDelete()}
+          onClose={() => setBulkDeleting(false)}
         />
       )}
     </div>

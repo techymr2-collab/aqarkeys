@@ -1,16 +1,19 @@
+import { useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PageLoader } from "@/components/ui/PageLoader";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/Table";
-import { usePayouts } from "@/data/payouts";
+import { ExpenseBreakdownModal } from "@/features/payouts/ExpenseBreakdownModal";
+import { usePayouts, type PayoutWithRelations } from "@/data/payouts";
 import { formatDate, formatMoney } from "@/lib/format";
 import { payoutStatusLabel, payoutStatusTone } from "@/lib/labels";
 import type { CurrencyCode } from "@/lib/database.types";
 
 export function OwnerPayoutsPage() {
   const { data, isLoading, isError, refetch } = usePayouts();
+  const [viewingExpenses, setViewingExpenses] = useState<PayoutWithRelations | null>(null);
 
   if (isLoading) return <PageLoader label="Loading your payouts" />;
   if (isError || !data) return <ErrorState onRetry={() => void refetch()} />;
@@ -56,6 +59,7 @@ export function OwnerPayoutsPage() {
               <TH>Property</TH>
               <TH>Period</TH>
               <TH className="text-right">Collected</TH>
+              <TH className="text-right">Expenses</TH>
               <TH className="text-right">Fee</TH>
               <TH className="text-right">Net to you</TH>
               <TH>Status</TH>
@@ -66,6 +70,19 @@ export function OwnerPayoutsPage() {
                   <TD className="font-medium text-slate-900">{p.property?.name ?? "—"}</TD>
                   <TD>{formatDate(p.period_start)}</TD>
                   <TD className="text-right">{formatMoney(p.gross_collected, p.currency)}</TD>
+                  <TD className="text-right">
+                    {p.expenses_total > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setViewingExpenses(p)}
+                        className="text-slate-600 underline-offset-2 hover:text-brand-600 hover:underline"
+                      >
+                        {formatMoney(p.expenses_total, p.currency)}
+                      </button>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </TD>
                   <TD className="text-right text-slate-500">
                     {formatMoney(p.fee_amount, p.currency)}
                   </TD>
@@ -80,6 +97,14 @@ export function OwnerPayoutsPage() {
             </TBody>
           </Table>
         </>
+      )}
+
+      {viewingExpenses && (
+        <ExpenseBreakdownModal
+          open={!!viewingExpenses}
+          onClose={() => setViewingExpenses(null)}
+          payout={viewingExpenses}
+        />
       )}
     </div>
   );

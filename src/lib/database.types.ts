@@ -6,6 +6,7 @@ export type UserRole = "manager" | "owner" | "tenant";
 export type UnitStatus = "occupied" | "vacant" | "under_maintenance" | "reserved";
 export type LeaseFrequency = "monthly" | "quarterly" | "semiannual" | "annual";
 export type LeaseStatus = "upcoming" | "active" | "expired" | "terminated";
+export type DepositStatus = "held" | "returned" | "partially_returned" | "forfeited";
 export type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "void";
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "cheque";
 export type CurrencyCode = "AED" | "GBP" | "USD" | "CAD";
@@ -24,7 +25,8 @@ export type MaintenanceStatus =
   | "on_hold"
   | "resolved"
   | "cancelled";
-export type PayoutStatus = "pending" | "paid";
+export type MaintenanceApprovalStatus = "not_required" | "pending" | "approved" | "rejected";
+export type PayoutStatus = "pending" | "paid" | "void";
 export type PdcStatus = "pending" | "deposited" | "cleared" | "bounced" | "cancelled";
 export type LeadStage =
   | "new"
@@ -118,6 +120,21 @@ export type Lease = Timestamps & {
   deposit_amount: number;
   currency: CurrencyCode;
   status: LeaseStatus;
+  deposit_status: DepositStatus;
+  deposit_returned_amount: number | null;
+  deposit_returned_date: string | null;
+  deposit_return_notes: string | null;
+};
+
+export type LeaseAmendment = {
+  id: string;
+  org_id: string;
+  lease_id: string;
+  changed_by: string | null;
+  change_type: string;
+  changes: Record<string, { from: unknown; to: unknown }>;
+  note: string | null;
+  created_at: string;
 };
 
 export type Invoice = Timestamps & {
@@ -188,6 +205,35 @@ export type MaintenanceRequest = Timestamps & {
   cost: number | null;
   expense_id: string | null;
   resolved_at: string | null;
+  due_date: string | null;
+  quoted_cost: number | null;
+  cost_approval_status: MaintenanceApprovalStatus;
+  approved_by: string | null;
+  approved_at: string | null;
+  vendor_rating: number | null;
+};
+
+export type MaintenancePhoto = {
+  id: string;
+  org_id: string;
+  maintenance_request_id: string;
+  uploaded_by: string | null;
+  file_path: string;
+  created_at: string;
+};
+
+export type MaintenanceSchedule = Timestamps & {
+  id: string;
+  org_id: string;
+  unit_id: string;
+  title: string;
+  description: string;
+  category: MaintenanceCategory;
+  priority: MaintenancePriority;
+  frequency_months: number;
+  next_run_date: string;
+  active: boolean;
+  created_by: string | null;
 };
 
 export type Vendor = Timestamps & {
@@ -274,6 +320,21 @@ export type Payout = Timestamps & {
   paid_date: string | null;
   method: PaymentMethod | null;
   note: string | null;
+  void_reason: string | null;
+  voided_at: string | null;
+  voided_by: string | null;
+};
+
+export type PayoutExpense = {
+  id: string;
+  org_id: string;
+  payout_id: string;
+  expense_id: string | null;
+  category: string;
+  amount: number;
+  expense_date: string;
+  note: string | null;
+  created_at: string;
 };
 
 export type AutomationRun = {
@@ -322,6 +383,10 @@ export interface Database {
       automation_runs: TableShape<AutomationRun>;
       leads: TableShape<Lead>;
       invoice_line_items: TableShape<InvoiceLineItem>;
+      lease_amendments: TableShape<LeaseAmendment>;
+      maintenance_photos: TableShape<MaintenancePhoto>;
+      maintenance_schedules: TableShape<MaintenanceSchedule>;
+      payout_expenses: TableShape<PayoutExpense>;
     };
     Views: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -9,9 +9,25 @@ import { PageLoader } from "@/components/ui/PageLoader";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/Table";
 import { RenewLeaseModal } from "@/features/leases/RenewLeaseModal";
+import { EditLeaseModal } from "@/features/leases/EditLeaseModal";
+import { ReturnDepositModal } from "@/features/leases/ReturnDepositModal";
 import { DocumentsPanel } from "@/features/documents/DocumentsPanel";
-import { HomeIcon, BanknoteIcon, ClipboardCheckIcon, RefreshCwIcon, XCircleIcon, TrashIcon } from "@/components/icons";
-import { useLeases, useTerminateLease, useDeleteLease } from "@/data/leases";
+import {
+  HomeIcon,
+  BanknoteIcon,
+  ClipboardCheckIcon,
+  RefreshCwIcon,
+  XCircleIcon,
+  TrashIcon,
+  PencilIcon,
+} from "@/components/icons";
+import {
+  useLeases,
+  useTerminateLease,
+  useDeleteLease,
+  useLeaseAmendments,
+  type LeaseAmendmentWithProfile,
+} from "@/data/leases";
 import { useInvoices } from "@/data/invoices";
 import { usePdcCheques } from "@/data/cheques";
 import { useEjariRegistrations } from "@/data/ejari";
@@ -25,10 +41,13 @@ import {
   pdcStatusLabel,
   pdcStatusTone,
   frequencyLabel,
+  depositStatusLabel,
+  depositStatusTone,
 } from "@/lib/labels";
 import { friendlyError } from "@/lib/errors";
 import { pushToast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
+import type { CurrencyCode, DepositStatus, LeaseFrequency, LeaseStatus } from "@/lib/database.types";
 
 function InfoCard({
   icon,
@@ -56,6 +75,68 @@ function InfoCard({
   );
 }
 
+const CHANGE_TYPE_LABEL: Record<string, string> = {
+  edit: "Terms edited",
+  renew: "Renewed",
+  terminate: "Terminated",
+  deposit_return: "Deposit resolved",
+};
+
+const FIELD_LABEL: Record<string, string> = {
+  rent_amount: "Rent",
+  frequency: "Frequency",
+  deposit_amount: "Deposit",
+  end_date: "End date",
+  status: "Status",
+  deposit_status: "Deposit status",
+  deposit_returned_amount: "Amount returned",
+};
+
+function formatChangeValue(field: string, value: unknown, currency: CurrencyCode): string {
+  if (value == null) return "—";
+  if (field === "rent_amount" || field === "deposit_amount" || field === "deposit_returned_amount") {
+    return formatMoney(Number(value), currency);
+  }
+  if (field === "end_date") return formatDate(String(value));
+  if (field === "frequency") return frequencyLabel[value as LeaseFrequency] ?? String(value);
+  if (field === "status") return leaseStatusLabel[value as LeaseStatus] ?? String(value);
+  if (field === "deposit_status") return depositStatusLabel[value as DepositStatus] ?? String(value);
+  return String(value);
+}
+
+function AmendmentRow({ amendment, currency }: { amendment: LeaseAmendmentWithProfile; currency: CurrencyCode }) {
+  const entries = Object.entries(amendment.changes);
+  return (
+    <div className="flex gap-3 py-3">
+      <div className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-500" />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-semibold text-slate-900">
+            {CHANGE_TYPE_LABEL[amendment.change_type] ?? amendment.change_type}
+          </p>
+          <p className="text-xs text-slate-400">
+            {formatDate(amendment.created_at.slice(0, 10))}
+            {amendment.changed_by_profile ? ` · ${amendment.changed_by_profile.full_name}` : ""}
+          </p>
+        </div>
+        {entries.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-sm text-slate-600">
+            {entries.map(([field, change]) => (
+              <li key={field}>
+                {FIELD_LABEL[field] ?? field}: {formatChangeValue(field, change.from, currency)} →{" "}
+                <span className="font-medium text-slate-800">
+                  {formatChangeValue(field, change.to, currency)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {amendment.note && <p className="mt-1 text-sm italic text-slate-500">"{amendment.note}"</p>}
+      </div>
+    </div>
+  );
+}
+
 export function ManagerLeaseDetailPage() {
   const { leaseId } = useParams();
   const navigate = useNavigate();
@@ -66,8 +147,11 @@ export function ManagerLeaseDetailPage() {
   const org = useOrganization();
   const terminate = useTerminateLease();
   const deleteLease = useDeleteLease();
+  const amendments = useLeaseAmendments(leaseId);
 
   const [renewing, setRenewing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [returningDeposit, setReturningDeposit] = useState(false);
   const [terminating, setTerminating] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -84,11 +168,20 @@ export function ManagerLeaseDetailPage() {
 
   const canTerminate = lease?.status === "active" || lease?.status === "upcoming";
   const canRenew = lease?.status === "active" || lease?.status === "expired";
+  const canEdit = lease?.status === "active" || lease?.status === "upcoming";
+  const canReturnDeposit =
+    (lease?.status === "terminated" || lease?.status === "expired") &&
+    lease?.deposit_status === "held" &&
+    lease.deposit_amount > 0;
 
   async function handleTerminate() {
     if (!lease?.unit) return;
     try {
-      await terminate.mutateAsync({ id: lease.id, unitId: lease.unit.id });
+      await terminate.mutateAsync({
+        id: lease.id,
+        unitId: lease.unit.id,
+        previousStatus: lease.status,
+      });
       pushToast("Lease terminated. Unit is now vacant.", "success");
       setTerminating(false);
     } catch (err) {
@@ -124,6 +217,12 @@ export function ManagerLeaseDetailPage() {
         subtitle={`${lease.unit?.label ?? "—"} · ${lease.unit?.property?.name ?? "—"}`}
         action={
           <div className="flex gap-2">
+            {canEdit && (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                <PencilIcon className="mr-1.5 h-4 w-4" />
+                Edit terms
+              </Button>
+            )}
             {canRenew && (
               <Button variant="secondary" onClick={() => setRenewing(true)}>
                 <RefreshCwIcon className="mr-1.5 h-4 w-4" />
@@ -161,7 +260,24 @@ export function ManagerLeaseDetailPage() {
 
         <InfoCard icon={<BanknoteIcon className="h-5 w-5" />} iconClass="bg-amber-50 text-amber-600" label="Deposit">
           <p className="mt-1 text-lg font-semibold text-slate-900">{formatMoney(lease.deposit_amount, lease.currency)}</p>
-          <p className="mt-0.5 text-xs text-slate-500">Held against this lease</p>
+          <p className="mt-1">
+            <Badge tone={depositStatusTone[lease.deposit_status]}>{depositStatusLabel[lease.deposit_status]}</Badge>
+          </p>
+          {lease.deposit_status !== "held" && lease.deposit_returned_amount != null && (
+            <p className="mt-0.5 text-xs text-slate-500">
+              {formatMoney(lease.deposit_returned_amount, lease.currency)} on{" "}
+              {formatDate(lease.deposit_returned_date)}
+            </p>
+          )}
+          {canReturnDeposit && (
+            <button
+              type="button"
+              onClick={() => setReturningDeposit(true)}
+              className="mt-1.5 text-xs font-medium text-brand-600 hover:underline"
+            >
+              Resolve deposit →
+            </button>
+          )}
         </InfoCard>
 
         <InfoCard icon={<ClipboardCheckIcon className="h-5 w-5" />} iconClass="bg-emerald-50 text-emerald-600" label="EJARI">
@@ -269,6 +385,27 @@ export function ManagerLeaseDetailPage() {
         </Table>
       )}
 
+      {/* ── Amendment history ───────────────────────────────────────── */}
+      <div className="mt-10 mb-4">
+        <h2 className="text-lg font-semibold text-slate-900">History</h2>
+        <p className="mt-0.5 text-sm text-slate-600">Every term change, renewal, and termination on this lease.</p>
+      </div>
+
+      {amendments.isLoading && <PageLoader label="Loading history" />}
+      {amendments.isError && <ErrorState onRetry={() => void amendments.refetch()} />}
+
+      {amendments.data && amendments.data.length === 0 && (
+        <EmptyState title="No changes yet" description="Edits, renewals, and terminations will be logged here." />
+      )}
+
+      {amendments.data && amendments.data.length > 0 && (
+        <div className="glass-card divide-y divide-slate-900/[0.06] px-5">
+          {amendments.data.map((a) => (
+            <AmendmentRow key={a.id} amendment={a} currency={lease.currency} />
+          ))}
+        </div>
+      )}
+
       {/* ── Documents ────────────────────────────────────────────────── */}
       <div className="mt-10 mb-4">
         <h2 className="text-lg font-semibold text-slate-900">Documents</h2>
@@ -277,6 +414,10 @@ export function ManagerLeaseDetailPage() {
       {leaseId && org.data && <DocumentsPanel entityType="lease" entityId={leaseId} orgId={org.data.id} />}
 
       {renewing && <RenewLeaseModal open={renewing} onClose={() => setRenewing(false)} lease={lease} />}
+      {editing && <EditLeaseModal open={editing} onClose={() => setEditing(false)} lease={lease} />}
+      {returningDeposit && (
+        <ReturnDepositModal open={returningDeposit} onClose={() => setReturningDeposit(false)} lease={lease} />
+      )}
       {terminating && (
         <ConfirmDialog
           open={terminating}

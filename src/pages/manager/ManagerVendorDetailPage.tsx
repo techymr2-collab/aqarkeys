@@ -9,7 +9,7 @@ import { PageLoader } from "@/components/ui/PageLoader";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/Table";
 import { VendorFormModal } from "@/features/vendors/VendorFormModal";
-import { ToolboxIcon, ChartIcon, BanknoteIcon, MailIcon } from "@/components/icons";
+import { ToolboxIcon, ChartIcon, BanknoteIcon, MailIcon, ClipboardCheckIcon } from "@/components/icons";
 import { useVendors, useDeleteVendor } from "@/data/vendors";
 import { useMaintenance } from "@/data/maintenance";
 import { formatDate, formatMoney } from "@/lib/format";
@@ -63,6 +63,11 @@ export function ManagerVendorDetailPage() {
   const totalSpend = jobs.reduce((s, j) => s + (j.cost ?? 0), 0);
   const currency = jobs[0]?.unit?.property?.currency ?? "AED";
   const completedJobs = jobs.filter((j) => j.status === "resolved").length;
+  const ratedJobs = jobs.filter((j) => j.vendor_rating != null);
+  const avgRating =
+    ratedJobs.length > 0
+      ? ratedJobs.reduce((s, j) => s + (j.vendor_rating ?? 0), 0) / ratedJobs.length
+      : null;
 
   async function handleDelete() {
     if (!vendorId) return;
@@ -98,7 +103,7 @@ export function ManagerVendorDetailPage() {
         }
       />
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <InfoCard icon={<ToolboxIcon className="h-5 w-5" />} iconClass="bg-brand-50 text-brand-600" label="Trade">
           <p className="mt-1 text-lg font-semibold text-slate-900">{maintenanceCategoryLabel[vendor.trade]}</p>
           <p className="mt-0.5 text-xs text-slate-500">{vendor.is_active ? "Active" : "Inactive"}</p>
@@ -116,14 +121,24 @@ export function ManagerVendorDetailPage() {
           </p>
         </InfoCard>
 
+        <InfoCard icon={<ClipboardCheckIcon className="h-5 w-5" />} iconClass="bg-rose-50 text-rose-600" label="Performance">
+          {avgRating != null ? (
+            <>
+              <p className="mt-1 text-lg font-semibold text-amber-500" aria-label={`${avgRating.toFixed(1)} out of 5`}>
+                {"★".repeat(Math.round(avgRating))}
+                <span className="text-slate-300">{"★".repeat(5 - Math.round(avgRating))}</span>
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {avgRating.toFixed(1)} avg · {ratedJobs.length} rated job{ratedJobs.length === 1 ? "" : "s"}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-sm font-medium text-slate-400">No ratings yet</p>
+          )}
+        </InfoCard>
+
         <InfoCard icon={<MailIcon className="h-5 w-5" />} iconClass="bg-slate-100 text-slate-600" label="Contact">
           <p className="mt-1 truncate text-sm font-semibold text-slate-900">{vendor.phone ?? vendor.email ?? "—"}</p>
-          {vendor.rating != null && (
-            <p className="mt-0.5 text-xs font-medium text-amber-500" aria-label={`${vendor.rating} out of 5`}>
-              {"★".repeat(vendor.rating)}
-              <span className="text-slate-300">{"★".repeat(5 - vendor.rating)}</span>
-            </p>
-          )}
         </InfoCard>
       </div>
 
@@ -151,6 +166,7 @@ export function ManagerVendorDetailPage() {
             <TH>Reported</TH>
             <TH className="text-right">Cost</TH>
             <TH>Status</TH>
+            <TH>Rating</TH>
           </THead>
           <TBody>
             {jobs.map((j) => (
@@ -166,6 +182,16 @@ export function ManagerVendorDetailPage() {
                 </TD>
                 <TD>
                   <Badge tone={maintenanceStatusTone[j.status]}>{maintenanceStatusLabel[j.status]}</Badge>
+                </TD>
+                <TD>
+                  {j.vendor_rating != null ? (
+                    <span className="text-amber-500" aria-label={`${j.vendor_rating} out of 5`}>
+                      {"★".repeat(j.vendor_rating)}
+                      <span className="text-slate-300">{"★".repeat(5 - j.vendor_rating)}</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
                 </TD>
               </TR>
             ))}

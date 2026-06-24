@@ -1,8 +1,10 @@
 import type {
+  DepositStatus,
   InvoiceStatus,
   LeadStage,
   LeaseFrequency,
   LeaseStatus,
+  MaintenanceApprovalStatus,
   MaintenanceCategory,
   MaintenancePriority,
   MaintenanceStatus,
@@ -40,6 +42,20 @@ export const leaseStatusTone: Record<LeaseStatus, Tone> = {
   active: "green",
   expired: "slate",
   terminated: "rose",
+};
+
+export const depositStatusLabel: Record<DepositStatus, string> = {
+  held: "Held",
+  returned: "Returned",
+  partially_returned: "Partially returned",
+  forfeited: "Forfeited",
+};
+
+export const depositStatusTone: Record<DepositStatus, Tone> = {
+  held: "amber",
+  returned: "green",
+  partially_returned: "blue",
+  forfeited: "rose",
 };
 
 export const invoiceStatusLabel: Record<InvoiceStatus, string> = {
@@ -111,14 +127,30 @@ export const maintenanceStatusTone: Record<MaintenanceStatus, Tone> = {
   cancelled: "slate",
 };
 
+export const maintenanceApprovalStatusLabel: Record<MaintenanceApprovalStatus, string> = {
+  not_required: "—",
+  pending: "Awaiting approval",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+
+export const maintenanceApprovalStatusTone: Record<MaintenanceApprovalStatus, Tone> = {
+  not_required: "slate",
+  pending: "amber",
+  approved: "green",
+  rejected: "rose",
+};
+
 export const payoutStatusLabel: Record<PayoutStatus, string> = {
   pending: "Pending",
   paid: "Paid",
+  void: "Void",
 };
 
 export const payoutStatusTone: Record<PayoutStatus, Tone> = {
   pending: "amber",
   paid: "green",
+  void: "slate",
 };
 
 export const pdcStatusLabel: Record<PdcStatus, string> = {
